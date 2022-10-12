@@ -27,10 +27,10 @@ def read_data(file_path, type='file'):
         file_path (str): path for the data file
     """
     text = None
-    if type is 'file':
+    if type == 'file':
         with open(file_path, mode='r', encoding='utf-8') as fp:
             text = fp.read()
-    elif type is 'zip':
+    elif type == 'zip':
         with zipfile.ZipFile(file_path) as fp:
             text = fp.read(fp.namelist()[0]).decode()
     return text

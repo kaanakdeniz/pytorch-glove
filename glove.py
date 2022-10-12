@@ -12,24 +12,20 @@ class GloVeModel(nn.Module):
 
     def __init__(self, embedding_size, context_size, vocab_size, min_occurrance=1, x_max=100, alpha=3 / 4):
         super(GloVeModel, self).__init__()
-
         self.embedding_size = embedding_size
         if isinstance(context_size, tuple):
             self.left_context, self.right_context = context_size
         if isinstance(context_size, int):
             self.left_context = self.right_context = context_size
         else:
-            raise ValueError(
-                "'context_size' should be an int or a tuple of two ints")
+            raise ValueError("'context_size' should be an int or a tuple of two ints")
         self.vocab_size = vocab_size
         self.alpha = alpha
         self.min_occurrance = min_occurrance
         self.x_max = x_max
 
-        self._focal_embeddings = nn.Embedding(
-            vocab_size, embedding_size).type(torch.float64)
-        self._context_embeddings = nn.Embedding(
-            vocab_size, embedding_size).type(torch.float64)
+        self._focal_embeddings = nn.Embedding(vocab_size, embedding_size).type(torch.float64)
+        self._context_embeddings = nn.Embedding(vocab_size, embedding_size).type(torch.float64)
         self._focal_biases = nn.Embedding(vocab_size, 1).type(torch.float64)
         self._context_biases = nn.Embedding(vocab_size, 1).type(torch.float64)
         self._glove_dataset = None
@@ -38,19 +34,9 @@ class GloVeModel(nn.Module):
             init.uniform_(params, a=-1, b=1)
 
     def fit(self, corpus):
-        """get dictionary word list and co-occruence matrix from corpus
-
-        Args:
-            corpus (list): contain word id list
-
-        Raises:
-            ValueError: when count zero cocurrences will raise the problems
-        """
-
         left_size, right_size = self.left_context, self.right_context
         vocab_size, min_occurrance = self.vocab_size, self.min_occurrance
 
-        # get co-occurence count matrix
         word_counts = Counter()
         cooccurence_counts = defaultdict(float)
         for region in corpus:
@@ -61,11 +47,9 @@ class GloVeModel(nn.Module):
                     cooccurence_counts[(word, context_word)] += 1 / (i + 1)
                 for i, context_word in enumerate(right_context):
                     cooccurence_counts[(word, context_word)] += 1 / (i + 1)
-        if len(cooccurence_counts) == 0:
-            raise ValueError(
-                "No coccurrences in corpus, Did you try to reuse a generator?")
+        if not cooccurence_counts:
+            raise ValueError("No coccurrences in corpus, Did you try to reuse a generator?")
 
-        # get words bag information
         tokens = [word for word, count in
                   word_counts.most_common(vocab_size) if count >= min_occurrance]
         coocurrence_matrix = [(words[0], words[1], count)
@@ -74,24 +58,10 @@ class GloVeModel(nn.Module):
         self._glove_dataset = GloVeDataSet(coocurrence_matrix)
 
     def train(self, num_epoch, device, batch_size=512, learning_rate=0.05, loop_interval=10):
-        """Training GloVe model
-
-        Args:
-            num_epoch (int): number of epoch
-            device (str): cpu or gpu
-            batch_size (int, optional): Defaults to 512.
-            learning_rate (float, optional): Defaults to 0.05. learning rate for Adam optimizer
-            batch_interval (int, optional): Defaults to 100. interval time to show average loss
-
-        Raises:
-            NotFitToCorpusError: if the model is not fit by corpus, the error will be raise
-        """
 
         if self._glove_dataset is None:
-            raise NotFitToCorpusError(
-                "Please fit model with corpus before training")
+            raise NotFitToCorpusError("Please fit model with corpus before training")
 
-        # basic training setting
         optimizer = optim.Adam(self.parameters(), lr=learning_rate)
         glove_dataloader = DataLoader(self._glove_dataset, batch_size)
         total_loss = 0
@@ -109,28 +79,19 @@ class GloVeModel(nn.Module):
                 total_loss += loss.item()
                 if idx % loop_interval == 0:
                     avg_loss = total_loss / loop_interval
-                    print("epoch: {}, current step: {}, average loss: {}".format(
-                        epoch, idx, avg_loss))
+                    print(f"epoch: {epoch}, current step: {idx}, average loss: {avg_loss}")
                     total_loss = 0
-
                 loss.backward()
                 optimizer.step()
 
         print("finish glove vector training")
 
     def get_coocurrance_matrix(self):
-        """ Return co-occurance matrix for saving
-
-        Returns:
-            list: list itam (word_idx1, word_idx2, cooccurances)
-        """
-
         return self._glove_dataset._coocurrence_matrix
 
     def embedding_for_tensor(self, tokens):
         if not torch.is_tensor(tokens):
             raise ValueError("the tokens must be pytorch tensor object")
-
         return self._focal_embeddings(tokens) + self._context_embeddings(tokens)
 
     def _loss(self, focal_input, context_input, coocurrence_count):
@@ -149,11 +110,10 @@ class GloVeModel(nn.Module):
         log_cooccurrences = torch.log(coocurrence_count)
 
         distance_expr = (embedding_products + focal_bias +
-                         context_bias + log_cooccurrences) ** 2
+                         context_bias - log_cooccurrences) ** 2
 
         single_losses = weight_factor * distance_expr
-        mean_loss = torch.mean(single_losses)
-        return mean_loss
+        return torch.mean(single_losses)
 
 
 class GloVeDataSet(Dataset):
@@ -167,24 +127,7 @@ class GloVeDataSet(Dataset):
     def __len__(self):
         return len(self._coocurrence_matrix)
 
-
-class NotTrainedError(Exception):
-    pass
-
-
-class NotFitToCorpusError(Exception):
-    pass
-
-
 def _context_windows(region, left_size, right_size):
-    """generate left_context, word, right_context tuples for each region
-
-    Args:
-        region (str): a sentence
-        left_size (int): left windows size
-        right_size (int): right windows size
-    """
-
     for i, word in enumerate(region):
         start_index = i - left_size
         end_index = i + right_size
@@ -192,19 +135,12 @@ def _context_windows(region, left_size, right_size):
         right_context = _window(region, i + 1, end_index)
         yield (left_context, word, right_context)
 
-
 def _window(region, start_index, end_index):
-    """Returns the list of words starting from `start_index`, going to `end_index`
-    taken from region. If `start_index` is a negative number, or if `end_index`
-    is greater than the index of the last word in region, this function will pad
-    its return value with `NULL_WORD`.
-
-    Args:
-        region (str): the sentence for extracting the token base on the context
-        start_index (int): index for start step of window
-        end_index (int): index for the end step of window
-    """
     last_index = len(region) + 1
-    selected_tokens = region[max(start_index, 0):
-                             min(end_index, last_index) + 1]
-    return selected_tokens
+    return region[max(start_index, 0) : min(end_index, last_index) + 1]
+
+class NotTrainedError(Exception):
+    pass
+
+class NotFitToCorpusError(Exception):
+    pass
